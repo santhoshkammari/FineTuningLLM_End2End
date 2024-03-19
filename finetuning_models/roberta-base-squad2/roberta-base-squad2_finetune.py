@@ -2,22 +2,25 @@ import os
 import torch
 import torch.nn as nn
 import bitsandbytes as bnb
+import transformers
 
 from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoConfig, AutoModelForQuestionAnswering, BitsAndBytesConfig
 from huggingface_hub import login
+from datasets import load_dataset, DatasetDict
 
-from const import LOGIN_TOKEN,MODEL_NAME
+from const import LOGIN_TOKEN, MODEL_NAME, CUSTOM_DATASET_NAME
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Make sure CUDA is not visible
 login(token=LOGIN_TOKEN, add_to_git_credential=True)
 
+
 class RobertaFineTuneBaseSquad2:
-    def __init__(self,model = None,model_name = None):
+    def __init__(self, model=None, model_name=None):
         self.model = self._load_model(model_name)
         self.tokenizer = self._load_tokenizer(model_name)
 
-    def _load_model(self,model_name):
+    def _load_model(self, model_name):
         # quantization_config = BitsAndBytesConfig(
         #     load_in_8bit=True
         # )
@@ -30,13 +33,10 @@ class RobertaFineTuneBaseSquad2:
         print("Loaded model")
         return __model
 
-
-    def _load_tokenizer(self,model_name):
+    def _load_tokenizer(self, model_name):
         __tokenizer = AutoTokenizer.from_pretrained(model_name)
         print('Loaded tokenizer')
         return __tokenizer
-
-
 
     def freeze_model_weights(self):
         print("Freezing model weights")
@@ -51,6 +51,7 @@ class RobertaFineTuneBaseSquad2:
 
         class CastOutputToFloat(nn.Sequential):
             def forward(self, x): return super().forward(x).to(torch.float32)
+
         self.model.qa_outputs = CastOutputToFloat(self.model.qa_outputs)
 
     def print_trainable_parameters(self):
@@ -67,8 +68,8 @@ class RobertaFineTuneBaseSquad2:
             f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
         )
 
-    def abc(self):
-
+    def load_peft_model(self):
+        print("Loading peft model")
         config = LoraConfig(
             r=16,  # attention heads
             lora_alpha=32,  # alpha scaling
@@ -81,10 +82,60 @@ class RobertaFineTuneBaseSquad2:
         self.model = get_peft_model(self.model, config)
         self.print_trainable_parameters()
 
+    def perform_training(self, data):
+
+        trainer = transformers.Trainer(
+            model=self.model,
+            train_dataset=data['train'],
+            args=transformers.TrainingArguments(
+                per_device_train_batch_size=1,
+                gradient_accumulation_steps=1,
+                warmup_steps=100,
+                max_steps=200,
+                learning_rate=2e-4,
+                # fp16=True,
+                logging_steps=1,
+                output_dir='outputs'
+            ),
+            data_collator=transformers.DataCollatorForLanguageModeling(self.tokenizer, mlm=False)
+        )
+        self.model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
+        trainer.train()
+
+    @staticmethod
+    def load_custom_dataset(custom_dataset_name):
+        data = load_dataset(custom_dataset_name)
+        return data
+
+
+class DataTransformer:
+    @classmethod
+    def merge_columns(cls, example):
+        example["prediction"] = example["quote"] + " ->: " + str(example["tags"])
+        return example
+
+    @classmethod
+    def split_columns(cls, data, tokenizer):
+        print("Performing split")
+        data['train'] = data['train'].map(DataTransformer.merge_columns)
+        data = data.map(lambda samples: tokenizer(samples['prediction']), batched=True)
+        return data
+
 
 if __name__ == '__main__':
     roberta_squad2 = RobertaFineTuneBaseSquad2(
         model_name=MODEL_NAME
     )
     roberta_squad2.freeze_model_weights()
-    roberta_squad2.print_trainable_parameters()
+
+    roberta_squad2.load_peft_model()
+
+    custom_data = roberta_squad2.load_custom_dataset(
+        custom_dataset_name=CUSTOM_DATASET_NAME
+    )
+    updated_data: DatasetDict = DataTransformer.split_columns(
+        custom_data,
+        tokenizer=roberta_squad2.tokenizer
+    )
+
+    roberta_squad2.perform_training(updated_data)
