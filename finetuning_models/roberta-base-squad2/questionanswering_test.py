@@ -41,12 +41,14 @@ updated_data: DatasetDict = DataTransformer.split_columns(
 dataset = {'train':[],'test':[]}
 
 print(updated_data)
+TRAIN_TEST_SPLIT = 2000
 for i,k in enumerate(updated_data['train']):
-    key = 'train' if i<=2000 else 'test'
+    # if i>50: break
+    key = 'train' if i<= TRAIN_TEST_SPLIT else 'test'
     dataset[key].append({
         # 'id': updated_data['train'][i]['input_ids'] ,
-        'dialogue':updated_data['train'][i]['prediction'],
-        'summary':updated_data['train'][i]['quote'],
+        'dialogue':updated_data['train'][i]['quote'],
+        'summary':",".join(updated_data['train'][i]['tags']),
         'id':str(i)
     })
 
@@ -55,20 +57,17 @@ def prompt_instruction_format(sample):
     Use the Task below and the Input given to write the Response:
 
     ### Task:
-    Summarize the Input
-
-    ### Input:
-    {sample['dialogue']}
-
-    ### Response:
-    {sample['summary']}
+    Extract the Key points and only return relevant words
+    
+    {sample['dialogue']} ->:{sample['summary']
+  }
     """
 print("TrainingArguments")
 # Create the trainer
 trainingArgs = TrainingArguments(
     output_dir='output',
     num_train_epochs=1,
-    per_device_train_batch_size=2,
+    per_device_train_batch_size=3,
     save_strategy="epoch",
     learning_rate=2e-4
 )
@@ -97,10 +96,43 @@ login(token=LOGIN_TOKEN)
 tokenizer.save_pretrained('santhoshkammari/flan-t5-small')
 
 #Create model card
-trainer.create_model_card()
+trainer.create_model_card(model_name='FLANFt-t5-small')
 
 # Push the results to the hub
-# trainer.push_to_hub()
-exit('================================================================')
 trainer.train()
+print("Training Successfully")
+trainer.push_to_hub(commit_message='New model',model_name= 'FLANFt-t5-small')
 
+summarizer = pipeline("summarization", model="santhoshkammari/output")
+
+# select a random test sample
+sample = dataset['test'][randrange(len(dataset["test"]))]
+print(f"dialogue: \n{sample['dialogue']}\n--------------- len: {len(sample['dialogue'])}")
+print(f"summary: \n{sample['summary']}\n--------------- len: {len(sample['summary'])}")
+dailogue = "There are only two ways to live your life"
+# summarize dialogue
+res = summarizer(f"{sample['dialogue']} ->:",max_length = 33
+                 )
+
+print(res)
+print(f"flan-t5-small summary:\n{res[0]['summary_text']}")
+from transformers import T5ForConditionalGeneration, T5Tokenizer
+
+# Load tokenizer and model
+
+# Input text
+
+# sample = dataset['test'][randrange(len(dataset["test"]))]
+# sample = updated_data['train'][200]
+# print(f"dialogue: \n{sample['prediction']}\n---------------")
+# print(f"summary: \n{sample['quote']}\n---------------")
+#
+# # Tokenize input text
+# inputs = tokenizer.encode("summarize: " + sample['quote'], return_tensors="pt", max_length=200, truncation=True)
+#
+# # Generate summary
+# summary_ids = model.generate(inputs, max_length=500, num_beams=4, early_stopping=True)
+#
+# # Decode and print summary
+# print("flan-t5-small summary:")
+# print(tokenizer.decode(summary_ids[0], skip_special_tokens=True))
