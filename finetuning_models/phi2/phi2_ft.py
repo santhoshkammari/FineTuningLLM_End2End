@@ -1,1 +1,2 @@
 import transformers
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
