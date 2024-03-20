@@ -1,24 +1,12 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-import torch
+from huggingface_hub import  login
+login(token="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")
+
+import torch,os
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-from transformers import AutoTokenizer, AutoModelForCausalLM
-
-from huggingface_hub import  login
-login(token="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",add_to_git_credential=True)
-tokenizer = AutoTokenizer.from_pretrained("google/gemma-2b")
-model = AutoModelForCausalLM.from_pretrained("google/gemma-2b")
-
-input_text = "Write me a poem about Machine Learning."
-input_ids = tokenizer(input_text, return_tensors="pt")
-
-outputs = model.generate(**input_ids)
-print(tokenizer.decode(outputs[0]))
-
-
-exit('================================================================')
 model_id = "google/gemma-2b"
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -26,15 +14,13 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_compute_dtype=torch.bfloat16
 )
 
-tokenizer = AutoTokenizer.from_pretrained(model_id, token="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")
-model = AutoModelForCausalLM.from_pretrained(model_id,
-                                             # quantization_config=bnb_config,
-                                             # device_map={"":0},
-                                             token="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")
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config,
+                                             device_map = 'cuda')
+
 
 text = "Quote: Imagination is more"
-device = "cuda:0"
-inputs = tokenizer(text, return_tensors="pt").to(device)
+inputs = tokenizer(text, return_tensors="pt").to("cuda")
 
 outputs = model.generate(**inputs, max_new_tokens=20)
 print(tokenizer.decode(outputs[0], skip_special_tokens=True))
